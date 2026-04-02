@@ -1,295 +1,303 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  onSnapshot, 
-  setDoc, 
-  writeBatch
-} from 'firebase/firestore';
-import { 
-  getAuth, 
-  signInWithCustomToken, 
-  signInAnonymously, 
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-  Lock, 
-  Search, 
-  Save, 
-  X, 
-  RefreshCw,
-  Hash,
-  Key
-} from 'lucide-react';
-
-// --- Firebase Configuration ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'door-code-manager';
-
-const INITIAL_DATA = {
-  "101": { code: "C269", notes: "" },
-  "102": { code: "C247", notes: "" },
-  "103": { code: "C314", notes: "" },
-  "104": { code: "C167", notes: "" },
-  "105": { code: "C259", notes: "" },
-  "106": { code: "C348", notes: "" },
-  "201": { code: "C389", notes: "" },
-  "202": { code: "C169", notes: "" },
-  "203": { code: "C314", notes: "" },
-  "204": { code: "C238", notes: "" },
-  "205": { code: "C258", notes: "" },
-  "207": { code: "C468", notes: "" },
-  "208": { code: "C268", notes: "" },
-  "210": { code: "C279", notes: "" },
-  "211": { code: "C457", notes: "" },
-  "P2":  { code: "C213", notes: "Parking/Entry" },
-  "301": { code: "C268", notes: "" },
-  "302": { code: "C259", notes: "" },
-  "303": { code: "C124", notes: "" },
-  "304": { code: "C268", notes: "" },
-  "305": { code: "C567", notes: "" },
-  "306": { code: "C327", notes: "" },
-  "307": { code: "C456", notes: "" },
-  "308": { code: "C147", notes: "" },
-  "309": { code: "C359", notes: "" },
-  "310": { code: "C137", notes: "" },
-  "311": { code: "C567", notes: "" },
-  "312": { code: "C389", notes: "" },
-  "313": { code: "C249", notes: "" },
-  "314": { code: "C125", notes: "" },
-  "316": { code: "C348", notes: "" },
-};
-
-const COLLECTION_NAME = 'door_codes';
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [rooms, setRooms] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('100s');
-  const [editingRoom, setEditingRoom] = useState(null);
-  const [tempCode, setTempCode] = useState('');
-  const [tempNote, setTempNote] = useState('');
-  const [statusMsg, setStatusMsg] = useState({ text: '', type: '' });
-
-  // Add External Script
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.src = "https://loren-6q.github.io/WETNav/nav.js";
-    script.async = true;
-    document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
-
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WET DOORS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@900&family=JetBrains+Mono:wght@800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: black;
+            -webkit-tap-highlight-color: transparent;
         }
-      } catch (error) { console.error("Auth init failed", error); }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
+        .font-mono {
+            font-family: 'JetBrains+Mono', monospace;
+        }
+        input:focus, textarea:focus {
+            outline: none;
+        }
+        /* Custom scrollbar for a clean look */
+        ::-webkit-scrollbar {
+            width: 0px;
+        }
+        .active-tab {
+            background-color: #0891b2; /* cyan-600 */
+            color: white;
+            border-bottom-color: #67e8f9; /* cyan-300 */
+        }
+        .edit-overlay {
+            display: none;
+        }
+        .edit-overlay.active {
+            display: flex;
+        }
+    </style>
+</head>
+<body class="text-white selection:bg-cyan-500 overflow-x-hidden min-h-screen flex flex-col">
 
-  useEffect(() => {
-    if (!user) return;
-    const roomsRef = collection(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME);
-    const unsubscribe = onSnapshot(roomsRef, async (snapshot) => {
-      if (snapshot.empty) {
-        const batch = writeBatch(db);
-        Object.entries(INITIAL_DATA).forEach(([id, data]) => {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, id);
-          batch.set(docRef, { ...data, lastUpdated: Date.now() });
-        });
-        await batch.commit();
-        return;
-      }
-      const data = {};
-      snapshot.forEach((doc) => { data[doc.id] = doc.data(); });
-      setRooms(data);
-      setLoading(false);
-    }, (err) => console.error("Sync error", err));
-    return () => unsubscribe();
-  }, [user]);
-
-  const showStatus = (text, type = 'success') => {
-    setStatusMsg({ text, type });
-    setTimeout(() => setStatusMsg({ text: '', type: '' }), 3000);
-  };
-
-  const handleUpdateCode = async (roomId) => {
-    if (!user) return;
-    try {
-      const roomRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, roomId);
-      await setDoc(roomRef, {
-        code: tempCode || '----',
-        notes: tempNote || '',
-        lastUpdated: Date.now(),
-      }, { merge: true });
-      setEditingRoom(null);
-      showStatus(`Updated RM ${roomId}`);
-    } catch (error) { showStatus("Failed", "error"); }
-  };
-
-  const sections = {
-    '100s': Object.entries(rooms).filter(([id]) => id.startsWith('1')),
-    '200s': Object.entries(rooms).filter(([id]) => id.startsWith('2') || id === 'P2'),
-    '300s': Object.entries(rooms).filter(([id]) => id.startsWith('3')),
-  };
-
-  const filteredItems = useMemo(() => {
-    const all = Object.entries(rooms).map(([id, data]) => ({ id, ...data }));
-    if (!searchTerm) {
-      return (sections[activeTab] || []).map(([id, data]) => ({ id, ...data })).sort((a,b) => a.id.localeCompare(b.id));
-    }
-    return all.filter(r => 
-      r.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      r.code.toLowerCase().includes(searchTerm.toLowerCase())
-    ).sort((a,b) => a.id.localeCompare(b.id));
-  }, [rooms, searchTerm, activeTab]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-black">
-        <RefreshCw className="w-12 h-12 animate-spin text-cyan-400" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-black text-white font-sans selection:bg-cyan-500 flex flex-col overflow-x-hidden">
-      {/* High Contrast Header */}
-      <header className="sticky top-0 z-30 bg-neutral-900 border-b-4 border-cyan-600 p-1.5 sm:p-3 shadow-2xl">
-        <div className="flex items-center justify-between mb-1.5 px-1">
-          <div className="flex items-center gap-1.5">
-            <Key className="w-8 h-8 text-cyan-400" />
-            <h1 className="text-2xl font-black tracking-tighter italic text-white underline decoration-cyan-500 underline-offset-4">WET DOORS</h1>
-          </div>
+    <!-- Header -->
+    <header class="sticky top-0 z-30 bg-neutral-900 border-b-4 border-cyan-600 p-1.5 sm:p-3 shadow-2xl">
+        <div class="flex items-center justify-between mb-1.5 px-1">
+            <div class="flex items-center gap-1.5">
+                <i data-lucide="key" class="w-8 h-8 text-cyan-400"></i>
+                <h1 class="text-2xl font-black tracking-tighter italic text-white underline decoration-cyan-500 underline-offset-4 uppercase">WET DOORS</h1>
+            </div>
         </div>
 
-        <div className="flex gap-1.5 items-center">
-          {/* Search Bar - Fixed to ~10 digits width */}
-          <div className="relative w-[140px] shrink-0">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-500" />
-            <input 
-              type="text"
-              placeholder="SEARCH"
-              className="w-full bg-neutral-800 border-2 border-neutral-700 rounded-lg py-2 pl-7 pr-1 text-base font-black focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 placeholder:text-neutral-600 outline-none"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          
-          {/* Tabs - Expanded space */}
-          {!searchTerm && (
-            <div className="flex gap-1 flex-1">
-              {Object.keys(sections).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 py-2 rounded-lg text-lg font-black transition-all border-b-4 ${activeTab === tab ? 'bg-cyan-600 text-white border-cyan-300' : 'bg-neutral-800 text-neutral-500 border-neutral-700'}`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </header>
-
-      <main className="p-1 sm:p-2 max-w-6xl mx-auto flex-1 w-full">
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1.5">
-          {filteredItems.map((room) => (
-            <div 
-              key={room.id}
-              onClick={() => {
-                setEditingRoom(room.id);
-                setTempCode(room.code);
-                setTempNote(room.notes);
-              }}
-              className="bg-neutral-900 border-2 border-neutral-800 rounded-lg flex flex-col items-center justify-between py-2 px-1 active:bg-cyan-900 active:border-cyan-500 transition-all cursor-pointer shadow-lg"
-            >
-              <div className="w-full flex flex-col items-center">
-                <span className="text-[11px] font-black text-neutral-600 uppercase tracking-tighter leading-none mb-0.5">RM</span>
-                <h3 className="text-3xl font-black leading-none tracking-tighter text-white">{room.id}</h3>
-              </div>
-              
-              <div className="w-full border-t border-neutral-800 mt-1.5 pt-1.5 flex flex-col items-center">
-                <span className="text-[11px] font-black text-cyan-600 uppercase tracking-tighter leading-none mb-0.5">CODE</span>
-                <div className="text-3xl font-mono font-black text-white leading-none tracking-tighter">{room.code}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </main>
-
-      {/* Persistence confirmation footer */}
-      <footer className="text-[9px] text-center py-4 text-neutral-700 font-black uppercase tracking-[0.2em] border-t border-neutral-900 mt-2 mb-12">
-        WET DOORS SECURE CLOUD SYNC ACTIVE
-      </footer>
-
-      {/* Edit Overlay */}
-      {editingRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4">
-          <div className="bg-neutral-900 w-full max-w-sm rounded-[2rem] p-6 border-4 border-cyan-600 shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-6xl font-black italic tracking-tighter text-white">RM {editingRoom}</h2>
-              <button onClick={() => setEditingRoom(null)} className="p-3 bg-neutral-800 rounded-full border border-neutral-700 text-white">
-                <X className="w-8 h-8" />
-              </button>
-            </div>
-
-            <div className="space-y-6">
-              <div>
-                <label className="text-sm font-black text-neutral-400 uppercase tracking-widest mb-2 block">ENTRY CODE</label>
+        <div class="flex gap-1.5 items-center">
+            <!-- Search Bar - Fixed to 10 digits width -->
+            <div class="relative w-[140px] shrink-0">
+                <i data-lucide="search" class="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-500"></i>
                 <input 
-                  type="text"
-                  autoFocus
-                  className="w-full bg-neutral-800 border-2 border-neutral-700 rounded-2xl py-6 px-4 text-5xl font-mono font-black text-cyan-400 text-center focus:ring-4 focus:ring-cyan-500/50 focus:border-cyan-500 outline-none"
-                  value={tempCode}
-                  onChange={(e) => setTempCode(e.target.value.toUpperCase())}
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-black text-neutral-400 uppercase tracking-widest mb-2 block">NOTES</label>
-                <textarea 
-                  className="w-full bg-neutral-800 border-2 border-neutral-700 rounded-2xl p-4 text-xl font-bold text-white focus:ring-4 focus:ring-cyan-500/50 focus:border-cyan-500 outline-none min-h-[100px]"
-                  placeholder="..."
-                  value={tempNote}
-                  onChange={(e) => setTempNote(e.target.value)}
-                />
-              </div>
-
-              <button 
-                onClick={() => handleUpdateCode(editingRoom)}
-                className="w-full bg-cyan-600 py-6 rounded-2xl text-3xl font-black text-white shadow-xl shadow-cyan-600/30 active:scale-95 transition-all flex items-center justify-center gap-3 border-b-8 border-cyan-800"
-              >
-                <Save className="w-10 h-10" /> SAVE
-              </button>
+                    type="text" 
+                    id="searchInput" 
+                    placeholder="SEARCH"
+                    class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-lg py-2 pl-7 pr-1 text-base font-black focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 placeholder:text-neutral-600"
+                >
             </div>
-          </div>
+            
+            <!-- Tabs -->
+            <div id="tabContainer" class="flex gap-1 flex-1">
+                <button onclick="setActiveTab('100s')" id="tab-100s" class="tab-btn flex-1 py-2 rounded-lg text-lg font-black transition-all border-b-4 bg-neutral-800 text-neutral-500 border-neutral-700">100s</button>
+                <button onclick="setActiveTab('200s')" id="tab-200s" class="tab-btn flex-1 py-2 rounded-lg text-lg font-black transition-all border-b-4 bg-neutral-800 text-neutral-500 border-neutral-700">200s</button>
+                <button onclick="setActiveTab('300s')" id="tab-300s" class="tab-btn flex-1 py-2 rounded-lg text-lg font-black transition-all border-b-4 bg-neutral-800 text-neutral-500 border-neutral-700">300s</button>
+            </div>
         </div>
-      )}
+    </header>
 
-      {statusMsg.text && (
-        <div className="fixed bottom-12 left-1/2 -translate-x-1/2 px-8 py-4 rounded-2xl bg-cyan-600 text-white font-black text-2xl z-[60] shadow-2xl border-2 border-cyan-400 flex items-center gap-3 animate-bounce">
-          <Lock className="w-8 h-8" /> {statusMsg.text}
+    <!-- Main Grid -->
+    <main class="p-1 sm:p-2 max-w-6xl mx-auto flex-1 w-full">
+        <div id="roomGrid" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1.5">
+            <!-- Rooms injected here -->
         </div>
-      )}
+    </main>
+
+    <!-- Persistence Footer -->
+    <footer class="text-[9px] text-center py-4 text-neutral-700 font-black uppercase tracking-[0.2em] border-t border-neutral-900 mt-2 mb-12">
+        WET DOORS SECURE CLOUD SYNC ACTIVE
+    </footer>
+
+    <!-- Edit Overlay -->
+    <div id="editOverlay" class="edit-overlay fixed inset-0 z-50 items-center justify-center bg-black/95 backdrop-blur-md p-4">
+        <div class="bg-neutral-900 w-full max-w-sm rounded-[2rem] p-6 border-4 border-cyan-600 shadow-2xl">
+            <div class="flex items-center justify-between mb-6">
+                <h2 id="editRoomTitle" class="text-6xl font-black italic tracking-tighter text-white uppercase">RM ---</h2>
+                <button onclick="closeEdit()" class="p-3 bg-neutral-800 rounded-full border border-neutral-700 text-white">
+                    <i data-lucide="x" class="w-8 h-8"></i>
+                </button>
+            </div>
+
+            <div class="space-y-6">
+                <div>
+                    <label class="text-sm font-black text-neutral-400 uppercase tracking-widest mb-2 block">ENTRY CODE</label>
+                    <div class="relative">
+                        <i data-lucide="hash" class="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-cyan-500"></i>
+                        <input 
+                            type="text" 
+                            id="editCodeInput"
+                            class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-2xl py-6 px-4 text-5xl font-mono font-black text-cyan-400 text-center focus:ring-4 focus:ring-cyan-500/50 focus:border-cyan-500"
+                        >
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-sm font-black text-neutral-400 uppercase tracking-widest mb-2 block">NOTES</label>
+                    <textarea 
+                        id="editNoteInput"
+                        class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-2xl p-4 text-xl font-bold text-white focus:ring-4 focus:ring-cyan-500/50 focus:border-cyan-500 min-h-[100px]"
+                        placeholder="..."
+                    ></textarea>
+                </div>
+
+                <button 
+                    onclick="saveChanges()"
+                    class="w-full bg-cyan-600 py-6 rounded-2xl text-3xl font-black text-white shadow-xl shadow-cyan-600/30 active:scale-95 transition-all flex items-center justify-center gap-3 border-b-8 border-cyan-800"
+                >
+                    <i data-lucide="save" class="w-10 h-10"></i> SAVE
+                </button>
+            </div>
+        </div>
     </div>
-  );
-}
+
+    <!-- Status Toast -->
+    <div id="toast" class="fixed bottom-12 left-1/2 -translate-x-1/2 px-8 py-4 rounded-2xl bg-cyan-600 text-white font-black text-2xl z-[60] shadow-2xl border-2 border-cyan-400 hidden items-center gap-3 animate-bounce">
+        <i data-lucide="lock" class="w-8 h-8"></i> <span id="toastText">SAVED</span>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getFirestore, collection, doc, onSnapshot, setDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+        // Configuration
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'door-code-manager';
+        const COLLECTION_NAME = 'door_codes';
+
+        const INITIAL_DATA = {
+            "101": { code: "C269", notes: "" }, "102": { code: "C247", notes: "" },
+            "103": { code: "C314", notes: "" }, "104": { code: "C167", notes: "" },
+            "105": { code: "C259", notes: "" }, "106": { code: "C348", notes: "" },
+            "201": { code: "C389", notes: "" }, "202": { code: "C169", notes: "" },
+            "203": { code: "C314", notes: "" }, "204": { code: "C238", notes: "" },
+            "205": { code: "C258", notes: "" }, "207": { code: "C468", notes: "" },
+            "208": { code: "C268", notes: "" }, "210": { code: "C279", notes: "" },
+            "211": { code: "C457", notes: "" }, "P2":  { code: "C213", notes: "Parking/Entry" },
+            "301": { code: "C268", notes: "" }, "302": { code: "C259", notes: "" },
+            "303": { code: "C124", notes: "" }, "304": { code: "C268", notes: "" },
+            "305": { code: "C567", notes: "" }, "306": { code: "C327", notes: "" },
+            "307": { code: "C456", notes: "" }, "308": { code: "C147", notes: "" },
+            "309": { code: "C359", notes: "" }, "310": { code: "C137", notes: "" },
+            "311": { code: "C567", notes: "" }, "312": { code: "C389", notes: "" },
+            "313": { code: "C249", notes: "" }, "314": { code: "C125", notes: "" },
+            "316": { code: "C348", notes: "" }
+        };
+
+        let rooms = {};
+        let activeTab = '100s';
+        let currentEditingId = null;
+        let searchTerm = '';
+
+        // Correct Authentication Flow
+        async function startApp() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Auth failed:", err);
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                if (!user) return;
+                const roomsRef = collection(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME);
+                
+                onSnapshot(roomsRef, async (snapshot) => {
+                    if (snapshot.empty) {
+                        const batch = writeBatch(db);
+                        Object.entries(INITIAL_DATA).forEach(([id, data]) => {
+                            batch.set(doc(roomsRef, id), { ...data, lastUpdated: Date.now() });
+                        });
+                        await batch.commit();
+                        return;
+                    }
+                    rooms = {};
+                    snapshot.forEach(doc => rooms[doc.id] = doc.data());
+                    render();
+                }, (error) => {
+                    console.error("Firestore sync error:", error);
+                });
+            });
+        }
+
+        // Global functions for HTML access
+        window.setActiveTab = (tab) => {
+            activeTab = tab;
+            searchTerm = '';
+            document.getElementById('searchInput').value = '';
+            render();
+        };
+
+        window.openEdit = (id) => {
+            currentEditingId = id;
+            const room = rooms[id];
+            document.getElementById('editRoomTitle').innerText = `RM ${id}`;
+            document.getElementById('editCodeInput').value = room.code;
+            document.getElementById('editNoteInput').value = room.notes || '';
+            document.getElementById('editOverlay').classList.add('active');
+            lucide.createIcons();
+        };
+
+        window.closeEdit = () => {
+            document.getElementById('editOverlay').classList.remove('active');
+            currentEditingId = null;
+        };
+
+        window.saveChanges = async () => {
+            if (!currentEditingId) return;
+            const newCode = document.getElementById('editCodeInput').value.toUpperCase();
+            const newNote = document.getElementById('editNoteInput').value;
+            
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, currentEditingId);
+            await setDoc(docRef, { code: newCode, notes: newNote, lastUpdated: Date.now() }, { merge: true });
+            
+            closeEdit();
+            showStatus(`UPDATED RM ${currentEditingId}`);
+        };
+
+        function showStatus(text) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastText').innerText = text;
+            toast.classList.remove('hidden');
+            toast.classList.add('flex');
+            setTimeout(() => {
+                toast.classList.add('hidden');
+                toast.classList.remove('flex');
+            }, 3000);
+        }
+
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            searchTerm = e.target.value.toLowerCase();
+            render();
+        });
+
+        function render() {
+            const grid = document.getElementById('roomGrid');
+            grid.innerHTML = '';
+
+            // Update Tab UI
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active-tab'));
+            if (!searchTerm) {
+                const tabBtn = document.getElementById(`tab-${activeTab}`);
+                if (tabBtn) tabBtn.classList.add('active-tab');
+            }
+
+            const roomList = Object.entries(rooms).map(([id, data]) => ({ id, ...data }));
+            
+            const filtered = roomList.filter(r => {
+                if (searchTerm) {
+                    return r.id.toLowerCase().includes(searchTerm) || r.code.toLowerCase().includes(searchTerm);
+                }
+                if (activeTab === '100s') return r.id.startsWith('1');
+                if (activeTab === '200s') return r.id.startsWith('2') || r.id === 'P2';
+                if (activeTab === '300s') return r.id.startsWith('3');
+                return false;
+            }).sort((a,b) => a.id.localeCompare(b.id));
+
+            filtered.forEach(room => {
+                const card = document.createElement('div');
+                card.className = "bg-neutral-900 border-2 border-neutral-800 rounded-lg flex flex-col items-center justify-between py-2 px-1 active:bg-cyan-900 active:border-cyan-500 transition-all cursor-pointer shadow-lg";
+                card.onclick = () => openEdit(room.id);
+                card.innerHTML = `
+                    <div class="w-full flex flex-col items-center">
+                        <span class="text-[11px] font-black text-neutral-600 uppercase tracking-tighter leading-none mb-0.5">RM</span>
+                        <h3 class="text-3xl font-black leading-none tracking-tighter text-white">${room.id}</h3>
+                    </div>
+                    <div class="w-full border-t border-neutral-800 mt-1.5 pt-1.5 flex flex-col items-center">
+                        <span class="text-[11px] font-black text-cyan-600 uppercase tracking-tighter leading-none mb-0.5">CODE</span>
+                        <div class="text-3xl font-mono font-black text-white leading-none tracking-tighter">${room.code}</div>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+            lucide.createIcons();
+        }
+
+        startApp();
+        lucide.createIcons();
+    </script>
+    
+    <!-- External WET Nav Script -->
+    <script src="https://loren-6q.github.io/WETNav/nav.js"></script>
+</body>
+</html>
