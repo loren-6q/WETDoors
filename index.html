@@ -140,13 +140,25 @@
         import { getFirestore, collection, doc, onSnapshot, setDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // ENV CHECK & CONFIG
-        const configRaw = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-        if (!configRaw) {
-            document.getElementById('loadingState').innerHTML = `<div class="p-4 bg-red-900/20 border border-red-500 rounded text-red-500 text-xs">Missing Firebase Config. If hosted on GitHub, paste your config in the index.html source.</div>`;
+        /**
+         * FIREBASE CONFIGURATION
+         * ----------------------
+         * These are your live credentials for the GitHub-hosted site.
+         */
+        let firebaseConfig = {
+            apiKey: "AIzaSyC2WjPkEsOJE5-Zzqum68OlViNgwDobvEs",
+            authDomain: "wet-doors.firebaseapp.com",
+            projectId: "wet-doors",
+            storageBucket: "wet-doors.firebasestorage.app",
+            messagingSenderId: "463062556147",
+            appId: "1:463062556147:web:4ddccdfe67cd4d3b974686"
+        };
+
+        // Auto-detect environment config if available (Canvas Preview override)
+        if (typeof __firebase_config !== 'undefined') {
+            firebaseConfig = JSON.parse(__firebase_config);
         }
 
-        const firebaseConfig = configRaw ? JSON.parse(configRaw) : {};
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'door-code-manager';
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
@@ -180,7 +192,6 @@
         // Authentication & Sync Lifecycle
         async function startApp() {
             try {
-                // Rule 3: Auth First
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
@@ -194,16 +205,13 @@
             onAuthStateChanged(auth, (user) => {
                 if (!user) return;
                 
-                // Rule 1: Strict paths
                 const roomsRef = collection(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME);
                 
-                // Rule 2: Simple queries
                 onSnapshot(roomsRef, async (snapshot) => {
                     document.getElementById('connectionStatus').innerText = "Live";
                     document.getElementById('connectionStatus').classList.remove('animate-pulse');
                     
                     if (snapshot.empty) {
-                        // Seed logic
                         const batch = writeBatch(db);
                         Object.entries(INITIAL_DATA).forEach(([id, data]) => {
                             batch.set(doc(roomsRef, id), { ...data, lastUpdated: Date.now() });
@@ -217,8 +225,7 @@
                     render();
                 }, (error) => {
                     console.error("Firestore sync error:", error);
-                    document.getElementById('connectionStatus').innerText = "Permission Denied";
-                    // Fallback render to prevent blank screen
+                    document.getElementById('connectionStatus').innerText = "Access Denied";
                     rooms = INITIAL_DATA;
                     render();
                 });
@@ -285,7 +292,6 @@
             if (!grid) return;
             grid.innerHTML = '';
 
-            // Update Tab UI
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active-tab'));
             if (!searchTerm) {
                 const tabBtn = document.getElementById(`tab-${activeTab}`);
