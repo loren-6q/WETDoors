@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>WET DOORS</title>
+    <!-- Favicon: Lock Icon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322d3ee' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='11' x='3' y='11' rx='2' ry='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/></svg>">
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -20,7 +23,6 @@
         input:focus, textarea:focus {
             outline: none;
         }
-        /* Custom scrollbar for a clean look */
         ::-webkit-scrollbar {
             width: 0px;
         }
@@ -46,10 +48,11 @@
                 <i data-lucide="key" class="w-8 h-8 text-cyan-400"></i>
                 <h1 class="text-2xl font-black tracking-tighter italic text-white underline decoration-cyan-500 underline-offset-4 uppercase">WET DOORS</h1>
             </div>
+            <div id="connectionStatus" class="text-[8px] font-bold text-cyan-900 bg-cyan-400/20 px-2 py-0.5 rounded uppercase tracking-tighter animate-pulse">Establishing Link...</div>
         </div>
 
         <div class="flex gap-1.5 items-center">
-            <!-- Search Bar - Fixed to 10 digits width -->
+            <!-- Search Bar - Fixed to 10 digits width (~140px) -->
             <div class="relative w-[140px] shrink-0">
                 <i data-lucide="search" class="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-500"></i>
                 <input 
@@ -72,7 +75,10 @@
     <!-- Main Grid -->
     <main class="p-1 sm:p-2 max-w-6xl mx-auto flex-1 w-full">
         <div id="roomGrid" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1.5">
-            <!-- Rooms injected here -->
+            <!-- Syncing Message -->
+            <div id="loadingState" class="col-span-full py-20 text-center">
+                <p class="text-neutral-600 font-bold uppercase tracking-[0.3em] animate-pulse">Connecting to Database...</p>
+            </div>
         </div>
     </main>
 
@@ -130,16 +136,21 @@
 
     <!-- Firebase SDKs -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
-        import { getFirestore, collection, doc, onSnapshot, setDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, doc, onSnapshot, setDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // Configuration
-        const firebaseConfig = JSON.parse(__firebase_config);
+        // ENV CHECK & CONFIG
+        const configRaw = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+        if (!configRaw) {
+            document.getElementById('loadingState').innerHTML = `<div class="p-4 bg-red-900/20 border border-red-500 rounded text-red-500 text-xs">Missing Firebase Config. If hosted on GitHub, paste your config in the index.html source.</div>`;
+        }
+
+        const firebaseConfig = configRaw ? JSON.parse(configRaw) : {};
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'door-code-manager';
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'door-code-manager';
         const COLLECTION_NAME = 'door_codes';
 
         const INITIAL_DATA = {
@@ -166,9 +177,10 @@
         let currentEditingId = null;
         let searchTerm = '';
 
-        // Correct Authentication Flow
+        // Authentication & Sync Lifecycle
         async function startApp() {
             try {
+                // Rule 3: Auth First
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
@@ -176,31 +188,43 @@
                 }
             } catch (err) {
                 console.error("Auth failed:", err);
+                document.getElementById('connectionStatus').innerText = "Auth Error";
             }
 
             onAuthStateChanged(auth, (user) => {
                 if (!user) return;
+                
+                // Rule 1: Strict paths
                 const roomsRef = collection(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME);
                 
+                // Rule 2: Simple queries
                 onSnapshot(roomsRef, async (snapshot) => {
+                    document.getElementById('connectionStatus').innerText = "Live";
+                    document.getElementById('connectionStatus').classList.remove('animate-pulse');
+                    
                     if (snapshot.empty) {
+                        // Seed logic
                         const batch = writeBatch(db);
                         Object.entries(INITIAL_DATA).forEach(([id, data]) => {
                             batch.set(doc(roomsRef, id), { ...data, lastUpdated: Date.now() });
                         });
                         await batch.commit();
-                        return;
+                        rooms = INITIAL_DATA;
+                    } else {
+                        rooms = {};
+                        snapshot.forEach(doc => rooms[doc.id] = doc.data());
                     }
-                    rooms = {};
-                    snapshot.forEach(doc => rooms[doc.id] = doc.data());
                     render();
                 }, (error) => {
                     console.error("Firestore sync error:", error);
+                    document.getElementById('connectionStatus').innerText = "Permission Denied";
+                    // Fallback render to prevent blank screen
+                    rooms = INITIAL_DATA;
+                    render();
                 });
             });
         }
 
-        // Global functions for HTML access
         window.setActiveTab = (tab) => {
             activeTab = tab;
             searchTerm = '';
@@ -211,6 +235,7 @@
         window.openEdit = (id) => {
             currentEditingId = id;
             const room = rooms[id];
+            if (!room) return;
             document.getElementById('editRoomTitle').innerText = `RM ${id}`;
             document.getElementById('editCodeInput').value = room.code;
             document.getElementById('editNoteInput').value = room.notes || '';
@@ -224,15 +249,19 @@
         };
 
         window.saveChanges = async () => {
-            if (!currentEditingId) return;
+            if (!currentEditingId || !auth.currentUser) return;
             const newCode = document.getElementById('editCodeInput').value.toUpperCase();
             const newNote = document.getElementById('editNoteInput').value;
             
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, currentEditingId);
-            await setDoc(docRef, { code: newCode, notes: newNote, lastUpdated: Date.now() }, { merge: true });
-            
-            closeEdit();
-            showStatus(`UPDATED RM ${currentEditingId}`);
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, currentEditingId);
+                await setDoc(docRef, { code: newCode, notes: newNote, lastUpdated: Date.now() }, { merge: true });
+                closeEdit();
+                showStatus(`UPDATED RM ${currentEditingId}`);
+            } catch (err) {
+                console.error("Save error:", err);
+                showStatus("Error Saving");
+            }
         };
 
         function showStatus(text) {
@@ -253,6 +282,7 @@
 
         function render() {
             const grid = document.getElementById('roomGrid');
+            if (!grid) return;
             grid.innerHTML = '';
 
             // Update Tab UI
@@ -274,6 +304,11 @@
                 return false;
             }).sort((a,b) => a.id.localeCompare(b.id));
 
+            if (filtered.length === 0) {
+                grid.innerHTML = '<div class="col-span-full py-10 text-center text-neutral-600 font-bold uppercase tracking-widest">No matching rooms</div>';
+                return;
+            }
+
             filtered.forEach(room => {
                 const card = document.createElement('div');
                 card.className = "bg-neutral-900 border-2 border-neutral-800 rounded-lg flex flex-col items-center justify-between py-2 px-1 active:bg-cyan-900 active:border-cyan-500 transition-all cursor-pointer shadow-lg";
@@ -285,7 +320,7 @@
                     </div>
                     <div class="w-full border-t border-neutral-800 mt-1.5 pt-1.5 flex flex-col items-center">
                         <span class="text-[11px] font-black text-cyan-600 uppercase tracking-tighter leading-none mb-0.5">CODE</span>
-                        <div class="text-3xl font-mono font-black text-white leading-none tracking-tighter">${room.code}</div>
+                        <div class="text-3xl font-mono font-black text-white leading-none tracking-tighter text-center">${room.code}</div>
                     </div>
                 `;
                 grid.appendChild(card);
